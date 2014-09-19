@@ -168,9 +168,9 @@ GLPainter.prototype.clearStencil = function() {
     gl.clear(gl.STENCIL_BUFFER_BIT);
 };
 
-GLPainter.prototype.drawClippingMask = function() {
+GLPainter.prototype.drawClippingMask = function(matrix) {
     var gl = this.gl;
-    gl.switchShader(this.fillShader, this.tile.posMatrix, this.tile.exMatrix);
+    gl.switchShader(this.fillShader, matrix);
     gl.colorMask(false, false, false, false);
 
     // Clear the entire stencil buffer, except for the 7th bit, which stores
@@ -206,69 +206,69 @@ GLPainter.prototype.bindDefaultFramebuffer = function() {
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
 };
 
-/*
- * Draw a new tile to the context, assuming that the viewport is
- * already correctly set.
- */
-GLPainter.prototype.draw = function glPainterDraw(tile, style, layers, params) {
-    this.tile = tile;
-
-    if (tile) {
-        this.drawClippingMask();
-    }
+GLPainter.prototype.render = function(style, sources, params) {
+    this.style = style;
+    this.sprite = style.sprite;
+    this.sources = sources;
+    this.params = params;
 
     this.frameHistory.record(this.transform.zoom);
-    this.drawLayers(tile, style, layers, params);
+    this.prepareBuffers();
 
-    if (params.debug) {
-        drawDebug(this.gl, this, tile, params);
-    }
+    this.renderLayers(style.stylesheet.layers);
 };
 
-GLPainter.prototype.drawLayers = function(tile, style, layers, params, matrix) {
-    // Draw layers front-to-back.
-    // Layers are already in reverse order from style.restructure()
-    for (var i = 0; i < layers.length; i++) {
-        this.drawLayer(tile, style, layers[i], params, matrix, tile && tile.buckets);
-    }
-};
-
-GLPainter.prototype.drawLayer = function(tile, style, layer, params, matrix, buckets) {
+GLPainter.prototype.renderLayers = function(layers, tile, matrix) {
     var gl = this.gl;
 
-    var layerStyle = style.computed[layer.id];
-    if (!layerStyle || layerStyle.hidden) return;
+    for (var i = layers.length - 1; i >= 0; i--) {
+        this.clearStencil();
 
-    if (layer.layers && layer.type === 'raster') {
-        drawRaster(gl, this, buckets[layer.bucket], layerStyle, params, style, layer, tile);
-    } else if (params.background) {
-        drawBackground(gl, this, undefined, layerStyle, this.identityMatrix, params, style.sprite);
-    } else {
+        var layer = layers[i],
+            computed = this.style.computed[layer.id];
 
-        var bucket = buckets[layer.bucket];
-        // There are no vertices yet for this layer.
-        if (!bucket || (bucket.hasData && !bucket.hasData())) return;
+        if (computed.hidden) {
+            continue;
 
-        var type = bucket.type;
+        } else if (layer.type === 'background') {
+            drawBackground(gl, this, layer, undefined, computed, undefined, this.identityMatrix);
 
-        if (bucket.minZoom && this.transform.zoom < bucket.minZoom) return;
-        if (bucket.maxZoom && this.transform.zoom >= bucket.maxZoom) return;
+        } else if (tile && matrix) {
+            this.renderTile(layer, computed, tile, matrix);
 
-        var draw = type === 'symbol' ? drawSymbol :
-                   type === 'fill' ? drawFill :
-                   type === 'line' ? drawLine :
-                   type === 'raster' ? drawRaster : null;
-
-        if (draw) {
-            var useMatrix = matrix || this.tile.posMatrix;
-            draw(gl, this, bucket, layerStyle, useMatrix, params, style.sprite);
         } else {
-            console.warn('No bucket type specified');
+            var bucket = this.style.buckets[layer.ref || layer.id],
+                source = this.sources[bucket.source];
+            source.render(layer, computed, this);
         }
+    }
+};
 
-        if (params.vertices && !layer.layers) {
-            drawVertices(gl, this, bucket);
-        }
+GLPainter.prototype.renderTile = function(layer, computed, tile, matrix) {
+    var gl = this.gl;
+    var bucket = tile.buckets[layer.ref || layer.id];
+
+    if (!bucket || (bucket.hasData && !bucket.hasData())) return;
+    if (bucket.minZoom && this.transform.zoom < bucket.minZoom) return;
+    if (bucket.maxZoom && this.transform.zoom >= bucket.maxZoom) return;
+
+    this.drawClippingMask(matrix);
+
+    var draw = {
+        symbol: drawSymbol,
+        fill: drawFill,
+        line: drawLine,
+        raster: drawRaster
+    }[bucket.type];
+
+    draw(gl, this, layer, bucket, computed, tile, matrix);
+
+    if (this.params.vertices) {
+        drawVertices(gl, this, bucket);
+    }
+
+    if (this.params.debug) {
+        drawDebug(gl, this, tile);
     }
 };
 

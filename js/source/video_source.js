@@ -101,11 +101,15 @@ VideoSource.prototype = util.inherit(Source, {
             tileCoords[3].x, tileCoords[3].y, 0, maxInt16,
             tileCoords[2].x, tileCoords[2].y, maxInt16, maxInt16
         ]);
-        this.boundsBuffer = gl.createBuffer();
-        gl.bindBuffer(gl.ARRAY_BUFFER, this.boundsBuffer);
-        gl.bufferData(gl.ARRAY_BUFFER, array, gl.STATIC_DRAW);
 
         this.tile = new Tile();
+        this.tile.bind = this.bind.bind(this);
+        this.tile.buckets = {};
+
+        this.tile.boundsBuffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, this.tile.boundsBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, array, gl.STATIC_DRAW);
+
         this.center = center;
     },
 
@@ -117,26 +121,15 @@ VideoSource.prototype = util.inherit(Source, {
         // noop
     },
 
-    render(layers, painter) {
+    render(layer, computed, painter) {
         if (!this._loaded) return;
         if (this.video.readyState < 2) return; // not enough data for current position
 
-        var layer = layers[0];
-
-        var bucket = {
-            type: 'raster',
-            tile: this,
-            boundsBuffer: this.boundsBuffer,
-            bind: this.bind.bind(this)
-        };
-
-        var buckets = {};
-        buckets[layer.bucket] = bucket;
-
         var c = this.center;
         this.tile.calculateMatrices(c.zoom, c.column, c.row, this.map.transform, painter);
-        painter.tile = this.tile;
-        painter.drawLayer(undefined, this.map.style, layer, {}, undefined, buckets);
+        this.tile.buckets[layer.id] = { type: 'raster' };
+
+        painter.renderTile(layer, computed, this.tile, this.tile.posMatrix);
     },
 
     bind(gl) {

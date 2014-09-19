@@ -5,7 +5,7 @@ var browser = require('../util/browser');
 
 module.exports = drawDebug;
 
-function drawDebug(gl, painter, tile, params) {
+function drawDebug(gl, painter, tile) {
     // Blend to the front, not the back.
     gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
 
@@ -19,7 +19,7 @@ function drawDebug(gl, painter, tile, params) {
     gl.drawArrays(gl.LINE_STRIP, 0, painter.debugBuffer.itemCount);
 
     // draw tile coordinate
-    var coord = params.z + '/' + params.x + '/' + params.y;
+    var coord = tile.z + '/' + tile.x + '/' + tile.y;
 
     var vertices = textVertices(coord, 50, 200, 5);
 

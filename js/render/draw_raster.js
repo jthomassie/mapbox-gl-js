@@ -7,7 +7,7 @@ var util = require('../util/util');
 
 module.exports = drawRaster;
 
-function drawRaster(gl, painter, bucket, layerStyle, params, style, layer, tile) {
+function drawRaster(gl, painter, layer, bucket, layerStyle, tile, posMatrix) {
     var texture;
 
     if (layer && layer.layers) {
@@ -28,13 +28,7 @@ function drawRaster(gl, painter, bucket, layerStyle, params, style, layer, tile)
             mat4.ortho(matrix, -buffer, 4096 + buffer, -4096 - buffer, buffer, 0, 1);
             mat4.translate(matrix, matrix, [0, -4096, 0]);
 
-            params.padded = mat4.create();
-            mat4.ortho(params.padded, 0, 4096, -4096, 0, 0, 1);
-            mat4.translate(params.padded, params.padded, [0, -4096, 0]);
-
-            painter.drawLayers(tile, style, layer.layers, params, matrix);
-
-            delete params.padded;
+            painter.renderLayers(layer.layers, tile, matrix);
 
             if (bucket.layoutProperties['raster-blur'] > 0) {
                 bucket.prerendered.blur(painter, bucket.layoutProperties['raster-blur']);
@@ -46,13 +40,13 @@ function drawRaster(gl, painter, bucket, layerStyle, params, style, layer, tile)
 
         texture = bucket.prerendered;
     } else {
-        texture = bucket.tile;
+        texture = tile;
     }
 
     gl.disable(gl.STENCIL_TEST);
 
     var shader = painter.rasterShader;
-    gl.switchShader(shader, painter.tile.posMatrix, painter.tile.exMatrix);
+    gl.switchShader(shader, posMatrix);
 
     // color parameters
     gl.uniform1f(shader.u_brightness_low, layerStyle['raster-brightness'][0]);

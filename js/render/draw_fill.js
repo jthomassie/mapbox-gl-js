@@ -5,9 +5,9 @@ var mat3 = require('gl-matrix').mat3;
 
 module.exports = drawFill;
 
-function drawFill(gl, painter, bucket, layerStyle, posMatrix, params, imageSprite) {
+function drawFill(gl, painter, layer, bucket, layerStyle, tile, posMatrix) {
 
-    var translatedPosMatrix = painter.translateMatrix(posMatrix, params.z, layerStyle['fill-translate'], layerStyle['fill-translate-anchor']);
+    var translatedPosMatrix = painter.translateMatrix(posMatrix, tile.zoom, layerStyle['fill-translate'], layerStyle['fill-translate-anchor']);
 
     var color = layerStyle['fill-color'];
 
@@ -37,7 +37,7 @@ function drawFill(gl, painter, bucket, layerStyle, posMatrix, params, imageSprit
     gl.colorMask(false, false, false, false);
 
     // Draw the actual triangle fan into the stencil buffer.
-    gl.switchShader(painter.fillShader, translatedPosMatrix, painter.tile.exMatrix);
+    gl.switchShader(painter.fillShader, translatedPosMatrix);
 
     // Draw all buffers
     vertex = bucket.buffers.fillVertex;
@@ -68,8 +68,8 @@ function drawFill(gl, painter, bucket, layerStyle, posMatrix, params, imageSprit
 
     // Because we're drawing top-to-bottom, and we update the stencil mask
     // below, we have to draw the outline first (!)
-    if (layerStyle['fill-antialias'] === true && params.antialiasing && !(layerStyle['fill-image'] && !strokeColor)) {
-        gl.switchShader(painter.outlineShader, translatedPosMatrix, painter.tile.exMatrix);
+    if (layerStyle['fill-antialias'] === true && !(layerStyle['fill-image'] && !strokeColor)) {
+        gl.switchShader(painter.outlineShader, translatedPosMatrix);
         gl.lineWidth(2 * browser.devicePixelRatio);
 
         if (strokeColor) {
@@ -111,7 +111,7 @@ function drawFill(gl, painter, bucket, layerStyle, posMatrix, params, imageSprit
 
     if (image) {
         // Draw texture fill
-        var imagePos = imageSprite.getPosition(image, true);
+        var imagePos = painter.sprite.getPosition(image, true);
         if (!imagePos) return;
 
         shader = painter.patternShader;
@@ -122,7 +122,7 @@ function drawFill(gl, painter, bucket, layerStyle, posMatrix, params, imageSprit
         gl.uniform1f(shader.u_mix, painter.transform.zoomFraction);
         gl.uniform1f(shader.u_opacity, opacity);
 
-        var factor = 8 / Math.pow(2, painter.transform.tileZoom - params.z);
+        var factor = 8 / Math.pow(2, painter.transform.tileZoom - tile.zoom);
 
         var matrix = mat3.create();
         mat3.scale(matrix, matrix, [
@@ -132,12 +132,12 @@ function drawFill(gl, painter, bucket, layerStyle, posMatrix, params, imageSprit
 
         gl.uniformMatrix3fv(shader.u_patternmatrix, false, matrix);
 
-        imageSprite.bind(gl, true);
+        painter.sprite.bind(gl, true);
 
     } else {
         // Draw filling rectangle.
         shader = painter.fillShader;
-        gl.switchShader(shader, params.padded || posMatrix);
+        gl.switchShader(shader, posMatrix);
         gl.uniform4fv(shader.u_color, color);
     }
 

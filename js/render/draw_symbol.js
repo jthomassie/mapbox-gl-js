@@ -5,13 +5,13 @@ var mat4 = require('gl-matrix').mat4;
 
 module.exports = drawSymbols;
 
-function drawSymbols(gl, painter, bucket, layerStyle, posMatrix, params, imageSprite) {
+function drawSymbols(gl, painter, layer, bucket, layerStyle, tile, posMatrix) {
     gl.disable(gl.STENCIL_TEST);
     if (bucket.elementGroups.text.groups.length) {
-        drawSymbol(gl, painter, bucket, layerStyle, posMatrix, params, imageSprite, 'text');
+        drawSymbol(gl, painter, bucket, layerStyle, tile, posMatrix, 'text');
     }
     if (bucket.elementGroups.icon.groups.length) {
-        drawSymbol(gl, painter, bucket, layerStyle, posMatrix, params, imageSprite, 'icon');
+        drawSymbol(gl, painter, bucket, layerStyle, tile, posMatrix, 'icon');
     }
     gl.enable(gl.STENCIL_TEST);
 }
@@ -21,9 +21,9 @@ var defaultSizes = {
     text: 24
 };
 
-function drawSymbol(gl, painter, bucket, layerStyle, posMatrix, params, imageSprite, prefix) {
+function drawSymbol(gl, painter, bucket, layerStyle, tile, posMatrix, prefix) {
 
-    posMatrix = painter.translateMatrix(posMatrix, params.z, layerStyle[prefix + '-translate'], layerStyle[prefix + '-translate-anchor']);
+    posMatrix = painter.translateMatrix(posMatrix, tile.zoom, layerStyle[prefix + '-translate'], layerStyle[prefix + '-translate-anchor']);
 
     var layoutProperties = bucket.layoutProperties;
 
@@ -44,7 +44,7 @@ function drawSymbol(gl, painter, bucket, layerStyle, posMatrix, params, imageSpr
     var sdf = text || bucket.elementGroups.sdfIcons;
     var shader, buffer, texsize;
 
-    if (!text && !imageSprite.loaded())
+    if (!text && !painter.sprite.loaded())
         return;
 
     gl.activeTexture(gl.TEXTURE0);
@@ -60,9 +60,9 @@ function drawSymbol(gl, painter, bucket, layerStyle, posMatrix, params, imageSpr
         buffer = bucket.buffers.glyphVertex;
         texsize = [painter.glyphAtlas.width / 4, painter.glyphAtlas.height / 4];
     } else {
-        imageSprite.bind(gl, alignedWithMap || params.rotating || params.zooming || fontScale != 1 || sdf);
+        painter.sprite.bind(gl, alignedWithMap || painter.params.rotating || painter.params.zooming || fontScale != 1 || sdf);
         buffer = bucket.buffers.iconVertex;
-        texsize = [imageSprite.img.width, imageSprite.img.height];
+        texsize = [painter.sprite.img.width, painter.sprite.img.height];
     }
 
     gl.switchShader(shader, posMatrix, exMatrix);

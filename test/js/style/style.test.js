@@ -206,16 +206,6 @@ test('style', function(t) {
         t.deepEqual(style.getClassList(), [], 'getClassList');
         t.deepEqual(style.removeClass('foo'), undefined, 'remove non-existent class');
 
-        // layerGroups
-        var style_layergroups = JSON.parse(JSON.stringify(style.layerGroups));
-        if (UPDATE) fs.writeFileSync(__dirname + '/../../expected/style-basic-layergroups.json', JSON.stringify(style_layergroups, null, 2));
-        var style_layergroups_expected = JSON.parse(fs.readFileSync(__dirname + '/../../expected/style-basic-layergroups.json'));
-        t.deepEqual(style_layergroups, style_layergroups_expected);
-
-        // Check non JSON-stringified properites of layerGroups arrays.
-        t.deepEqual(style.layerGroups[0].source, 'mapbox.mapbox-streets-v5');
-        t.deepEqual(style.layerGroups[1].source, undefined);
-
         // computed
         var style_computed = JSON.parse(JSON.stringify(style.computed));
         if (UPDATE) fs.writeFileSync(__dirname + '/../../expected/style-basic-computed.json', JSON.stringify(style_computed, null, 2));

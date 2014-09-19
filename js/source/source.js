@@ -69,7 +69,7 @@ Source.prototype = util.inherit(Evented, {
         return true;
     },
 
-    render(layers, painter) {
+    render(layer, computed, painter) {
         // Iteratively paint every tile.
         if (!this._loaded) return;
         var order = Object.keys(this._tiles);
@@ -78,27 +78,13 @@ Source.prototype = util.inherit(Evented, {
             var id = order[i];
             var tile = this._tiles[id];
             if (tile.loaded && !this.coveredTiles[id]) {
-                this._renderTile(tile, id, layers, painter);
+                var pos = TileCoord.fromID(id);
+                var z = pos.z, x = pos.x, y = pos.y, w = pos.w;
+                x += w * (1 << z);
+                tile.calculateMatrices(z, x, y, this.map.transform, painter);
+                painter.renderTile(layer, computed, tile, tile.posMatrix);
             }
         }
-    },
-
-    // Given a tile of data, its id, and a style layers, render the tile to the canvas
-    _renderTile(tile, id, layers, painter) {
-        var pos = TileCoord.fromID(id);
-        var z = pos.z, x = pos.x, y = pos.y, w = pos.w;
-        x += w * (1 << z);
-
-        tile.calculateMatrices(z, x, y, this.map.transform, painter);
-
-        painter.draw(tile, this.map.style, layers, {
-            z: z, x: x, y: y,
-            debug: this.map.debug,
-            antialiasing: this.map.antialiasing,
-            vertices: this.map.vertices,
-            rotating: this.map.rotating,
-            zooming: this.map.zooming
-        });
     },
 
     featuresAt(point, params, callback) {

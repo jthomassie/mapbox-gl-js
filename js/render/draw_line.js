@@ -2,7 +2,7 @@
 
 var browser = require('../util/browser');
 
-module.exports = function drawLine(gl, painter, bucket, layerStyle, posMatrix, params, imageSprite) {
+module.exports = function drawLine(gl, painter, layer, bucket, layerStyle, tile, posMatrix) {
     // don't draw zero-width lines
     if (layerStyle['line-width'] <= 0) return;
 
@@ -15,19 +15,19 @@ module.exports = function drawLine(gl, painter, bucket, layerStyle, posMatrix, p
     var outset = offset + width / 2 + antialiasing / 2;
 
     var color = layerStyle['line-color'];
-    var ratio = painter.transform.scale / (1 << params.z) / 8;
-    var vtxMatrix = painter.translateMatrix(posMatrix, params.z, layerStyle['line-translate'], layerStyle['line-translate-anchor']);
+    var ratio = painter.transform.scale / (1 << tile.zoom) / 8;
+    var vtxMatrix = painter.translateMatrix(posMatrix, tile.zoom, layerStyle['line-translate'], layerStyle['line-translate-anchor']);
 
     var shader;
 
-    var imagePos = layerStyle['line-image'] && imageSprite.getPosition(layerStyle['line-image']);
+    var imagePos = layerStyle['line-image'] && painter.sprite.getPosition(layerStyle['line-image']);
     if (imagePos) {
-        var factor = 8 / Math.pow(2, painter.transform.tileZoom - params.z);
+        var factor = 8 / Math.pow(2, painter.transform.tileZoom - tile.zoom);
 
-        imageSprite.bind(gl, true);
+        painter.sprite.bind(gl, true);
 
         shader = painter.linepatternShader;
-        gl.switchShader(shader, vtxMatrix, painter.tile.exMatrix);
+        gl.switchShader(shader, vtxMatrix, tile.exMatrix);
 
         gl.uniform2fv(shader.u_linewidth, [ outset, inset ]);
         gl.uniform1f(shader.u_ratio, ratio);
@@ -40,7 +40,7 @@ module.exports = function drawLine(gl, painter, bucket, layerStyle, posMatrix, p
 
     } else {
         shader = painter.lineShader;
-        gl.switchShader(shader, vtxMatrix, painter.tile.exMatrix);
+        gl.switchShader(shader, vtxMatrix, tile.exMatrix);
 
         gl.uniform2fv(shader.u_linewidth, [ outset, inset ]);
         gl.uniform1f(shader.u_ratio, ratio);
