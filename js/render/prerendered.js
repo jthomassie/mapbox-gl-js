@@ -86,7 +86,9 @@ PrerenderedTexture.prototype.blur = function(painter, passes) {
     mat4.ortho(matrix, 0, 4096, -4096, 0, 0, 1);
     mat4.translate(matrix, matrix, [0, -4096, 0]);
 
-    gl.switchShader(painter.gaussianShader, matrix);
+    gl.switchShader(painter.gaussianShader);
+    gl.uniformMatrix4fv(painter.gaussianShader.u_matrix, false, matrix);
+
     gl.activeTexture(gl.TEXTURE0);
     gl.uniform1i(painter.gaussianShader.u_image, 0);
 

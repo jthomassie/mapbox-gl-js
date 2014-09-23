@@ -4,7 +4,9 @@ var mat3 = require('gl-matrix').mat3;
 
 module.exports = drawBackground;
 
-function drawBackground(gl, painter, layer, bucket, layerStyle, tile, posMatrix) {
+function drawBackground(painter, layerStyle) {
+    var gl = painter.gl;
+
     var color = layerStyle['background-color'];
     var image = layerStyle['background-image'];
     var opacity = layerStyle['background-opacity'];
@@ -16,7 +18,7 @@ function drawBackground(gl, painter, layer, bucket, layerStyle, tile, posMatrix)
         if (!imagePos) return;
 
         shader = painter.patternShader;
-        gl.switchShader(shader, posMatrix);
+        gl.switchShader(shader);
         gl.uniform1i(shader.u_image, 0);
         gl.uniform2fv(shader.u_pattern_tl, imagePos.tl);
         gl.uniform2fv(shader.u_pattern_br, imagePos.br);
@@ -50,9 +52,11 @@ function drawBackground(gl, painter, layer, bucket, layerStyle, tile, posMatrix)
     } else {
         // Draw filling rectangle.
         shader = painter.fillShader;
-        gl.switchShader(shader, posMatrix);
+        gl.switchShader(shader);
         gl.uniform4fv(shader.u_color, color);
     }
+
+    gl.uniformMatrix4fv(shader.u_matrix, false, painter.identityMatrix);
 
     gl.disable(gl.STENCIL_TEST);
     gl.bindBuffer(gl.ARRAY_BUFFER, painter.backgroundBuffer);

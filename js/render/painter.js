@@ -170,7 +170,10 @@ GLPainter.prototype.clearStencil = function() {
 
 GLPainter.prototype.drawClippingMask = function(matrix) {
     var gl = this.gl;
-    gl.switchShader(this.fillShader, matrix);
+
+    gl.switchShader(this.fillShader);
+    gl.uniformMatrix4fv(this.fillShader.u_matrix, false, matrix);
+
     gl.colorMask(false, false, false, false);
 
     // Clear the entire stencil buffer, except for the 7th bit, which stores
@@ -207,20 +210,31 @@ GLPainter.prototype.bindDefaultFramebuffer = function() {
 };
 
 GLPainter.prototype.render = function(style, sources, params) {
+    var id;
+
     this.style = style;
     this.sprite = style.sprite;
     this.sources = sources;
     this.params = params;
 
+    this.tiles = {};
+    for (id in this.sources) {
+        this.tiles[id] = this.sources[id].renderedTiles(this);
+    }
+
     this.frameHistory.record(this.transform.zoom);
     this.prepareBuffers();
 
     this.renderLayers(style.stylesheet.layers);
+
+    if (this.params.debug) {
+        for (id in this.sources) {
+            drawDebug(this, this.tiles[id]);
+        }
+    }
 };
 
-GLPainter.prototype.renderLayers = function(layers, tile, matrix) {
-    var gl = this.gl;
-
+GLPainter.prototype.renderLayers = function(layers, tile) {
     for (var i = layers.length - 1; i >= 0; i--) {
         this.clearStencil();
 
@@ -231,51 +245,44 @@ GLPainter.prototype.renderLayers = function(layers, tile, matrix) {
             continue;
 
         } else if (layer.type === 'background') {
-            drawBackground(gl, this, layer, undefined, computed, undefined, this.identityMatrix);
-
-        } else if (tile && matrix) {
-            this.renderTile(layer, computed, tile, matrix);
+            drawBackground(this, computed);
 
         } else {
-            var bucket = this.style.buckets[layer.ref || layer.id],
-                source = this.sources[bucket.source];
-            source.render(layer, computed, this);
+            var bucket = this.style.buckets[layer.ref || layer.id];
+
+            if (bucket['min-zoom'] && this.transform.zoom < bucket['min-zoom']) continue;
+            if (bucket['max-zoom'] && this.transform.zoom >= bucket['max-zoom']) continue;
+
+            var tiles = tile ? [tile] : this.tiles[bucket.source];
+            if (!tiles.length)
+                continue;
+
+            if (layer.type === 'raster' && layer.layers) {
+                drawRaster.prerendered(this, layer, computed, tiles);
+
+            } else {
+                var draw = {
+                    symbol: drawSymbol,
+                    fill: drawFill,
+                    line: drawLine,
+                    raster: drawRaster
+                }[bucket.type];
+
+                draw(this, layer, computed, tiles);
+
+                if (this.params.vertices) {
+                    drawVertices(this, layer, tiles);
+                }
+            }
         }
-    }
-};
-
-GLPainter.prototype.renderTile = function(layer, computed, tile, matrix) {
-    var gl = this.gl;
-    var bucket = tile.buckets[layer.ref || layer.id];
-
-    if (!bucket || (bucket.hasData && !bucket.hasData())) return;
-    if (bucket.minZoom && this.transform.zoom < bucket.minZoom) return;
-    if (bucket.maxZoom && this.transform.zoom >= bucket.maxZoom) return;
-
-    this.drawClippingMask(matrix);
-
-    var draw = {
-        symbol: drawSymbol,
-        fill: drawFill,
-        line: drawLine,
-        raster: drawRaster
-    }[bucket.type];
-
-    draw(gl, this, layer, bucket, computed, tile, matrix);
-
-    if (this.params.vertices) {
-        drawVertices(gl, this, bucket);
-    }
-
-    if (this.params.debug) {
-        drawDebug(gl, this, tile);
     }
 };
 
 // Draws non-opaque areas. This is for debugging purposes.
 GLPainter.prototype.drawStencilBuffer = function() {
     var gl = this.gl;
-    gl.switchShader(this.fillShader, this.identityMatrix);
+    gl.switchShader(this.fillShader);
+    gl.uniformMatrix4fv(this.fillShader.u_matrix, false, this.identityMatrix);
 
     // Blend to the front, not the back.
     gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);

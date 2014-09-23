@@ -121,15 +121,14 @@ VideoSource.prototype = util.inherit(Source, {
         // noop
     },
 
-    render(layer, computed, painter) {
-        if (!this._loaded) return;
-        if (this.video.readyState < 2) return; // not enough data for current position
+    renderedTiles(painter) {
+        if (!this._loaded) return [];
+        if (this.video.readyState < 2) return []; // not enough data for current position
 
         var c = this.center;
         this.tile.calculateMatrices(c.zoom, c.column, c.row, this.map.transform, painter);
-        this.tile.buckets[layer.id] = { type: 'raster' };
 
-        painter.renderTile(layer, computed, this.tile, this.tile.posMatrix);
+        return [this.tile];
     },
 
     bind(gl) {

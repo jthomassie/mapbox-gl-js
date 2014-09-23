@@ -5,148 +5,163 @@ var mat3 = require('gl-matrix').mat3;
 
 module.exports = drawFill;
 
-function drawFill(gl, painter, layer, bucket, layerStyle, tile, posMatrix) {
+function drawFill(painter, layer, layerStyle, tiles) {
+    var gl = painter.gl;
 
-    var translatedPosMatrix = painter.translateMatrix(posMatrix, tile.zoom, layerStyle['fill-translate'], layerStyle['fill-translate-anchor']);
+    tiles.forEach(function(tile) {
+        var bucket = tile.buckets[layer.ref || layer.id];
+        if (!bucket)
+            return;
 
-    var color = layerStyle['fill-color'];
+        painter.drawClippingMask(tile.posMatrix);
 
-    var vertex, elements, group, count;
+        var translatedPosMatrix = painter.translateMatrix(tile.posMatrix, tile.zoom,
+            layerStyle['fill-translate'], layerStyle['fill-translate-anchor']);
 
-    // Draw the stencil mask.
+        var color = layerStyle['fill-color'];
 
-    // We're only drawing to the first seven bits (== support a maximum of
-    // 127 overlapping polygons in one place before we get rendering errors).
-    gl.stencilMask(0x3F);
-    gl.clear(gl.STENCIL_BUFFER_BIT);
+        var vertex, elements, group, count;
 
-    // Draw front facing triangles. Wherever the 0x80 bit is 1, we are
-    // increasing the lower 7 bits by one if the triangle is a front-facing
-    // triangle. This means that all visible polygons should be in CCW
-    // orientation, while all holes (see below) are in CW orientation.
-    gl.stencilFunc(gl.NOTEQUAL, 0x80, 0x80);
+        // Draw the stencil mask.
 
-    // When we do a nonzero fill, we count the number of times a pixel is
-    // covered by a counterclockwise polygon, and subtract the number of
-    // times it is "uncovered" by a clockwise polygon.
-    gl.stencilOpSeparate(gl.FRONT, gl.INCR_WRAP, gl.KEEP, gl.KEEP);
-    gl.stencilOpSeparate(gl.BACK, gl.DECR_WRAP, gl.KEEP, gl.KEEP);
+        // We're only drawing to the first seven bits (== support a maximum of
+        // 127 overlapping polygons in one place before we get rendering errors).
+        gl.stencilMask(0x3F);
+        gl.clear(gl.STENCIL_BUFFER_BIT);
 
-    // When drawing a shape, we first draw all shapes to the stencil buffer
-    // and incrementing all areas where polygons are
-    gl.colorMask(false, false, false, false);
+        // Draw front facing triangles. Wherever the 0x80 bit is 1, we are
+        // increasing the lower 7 bits by one if the triangle is a front-facing
+        // triangle. This means that all visible polygons should be in CCW
+        // orientation, while all holes (see below) are in CW orientation.
+        gl.stencilFunc(gl.NOTEQUAL, 0x80, 0x80);
 
-    // Draw the actual triangle fan into the stencil buffer.
-    gl.switchShader(painter.fillShader, translatedPosMatrix);
+        // When we do a nonzero fill, we count the number of times a pixel is
+        // covered by a counterclockwise polygon, and subtract the number of
+        // times it is "uncovered" by a clockwise polygon.
+        gl.stencilOpSeparate(gl.FRONT, gl.INCR_WRAP, gl.KEEP, gl.KEEP);
+        gl.stencilOpSeparate(gl.BACK, gl.DECR_WRAP, gl.KEEP, gl.KEEP);
 
-    // Draw all buffers
-    vertex = bucket.buffers.fillVertex;
-    vertex.bind(gl);
-    elements = bucket.buffers.fillElement;
-    elements.bind(gl);
+        // When drawing a shape, we first draw all shapes to the stencil buffer
+        // and incrementing all areas where polygons are
+        gl.colorMask(false, false, false, false);
 
-    var offset, elementOffset;
-    for (var i = 0; i < bucket.elementGroups.groups.length; i++) {
-        group = bucket.elementGroups.groups[i];
-        offset = group.vertexStartIndex * vertex.itemSize;
-        gl.vertexAttribPointer(painter.fillShader.a_pos, 2, gl.SHORT, false, 4, offset + 0);
-
-        count = group.elementLength * 3;
-        elementOffset = group.elementStartIndex * elements.itemSize;
-        gl.drawElements(gl.TRIANGLES, count, gl.UNSIGNED_SHORT, elementOffset);
-    }
-
-    // Now that we have the stencil mask in the stencil buffer, we can start
-    // writing to the color buffer.
-    gl.colorMask(true, true, true, true);
-
-    // From now on, we don't want to update the stencil buffer anymore.
-    gl.stencilOp(gl.KEEP, gl.KEEP, gl.KEEP);
-    gl.stencilMask(0x0);
-
-    var strokeColor = layerStyle['fill-outline-color'];
-
-    // Because we're drawing top-to-bottom, and we update the stencil mask
-    // below, we have to draw the outline first (!)
-    if (layerStyle['fill-antialias'] === true && !(layerStyle['fill-image'] && !strokeColor)) {
-        gl.switchShader(painter.outlineShader, translatedPosMatrix);
-        gl.lineWidth(2 * browser.devicePixelRatio);
-
-        if (strokeColor) {
-            // If we defined a different color for the fill outline, we are
-            // going to ignore the bits in 0x3F and just care about the global
-            // clipping mask.
-            gl.stencilFunc(gl.EQUAL, 0x80, 0x80);
-        } else {
-            // Otherwise, we only want to draw the antialiased parts that are
-            // *outside* the current shape. This is important in case the fill
-            // or stroke color is translucent. If we wouldn't clip to outside
-            // the current shape, some pixels from the outline stroke overlapped
-            // the (non-antialiased) fill.
-            gl.stencilFunc(gl.EQUAL, 0x80, 0xBF);
-        }
-
-        gl.uniform2f(painter.outlineShader.u_world, gl.drawingBufferWidth, gl.drawingBufferHeight);
-        gl.uniform4fv(painter.outlineShader.u_color, strokeColor ? strokeColor : color);
+        // Draw the actual triangle fan into the stencil buffer.
+        gl.switchShader(painter.fillShader);
+        gl.uniformMatrix4fv(painter.fillShader.u_matrix, false, translatedPosMatrix);
 
         // Draw all buffers
         vertex = bucket.buffers.fillVertex;
-        elements = bucket.buffers.outlineElement;
+        vertex.bind(gl);
+        elements = bucket.buffers.fillElement;
         elements.bind(gl);
 
-        for (var k = 0; k < bucket.elementGroups.groups.length; k++) {
-            group = bucket.elementGroups.groups[k];
+        var offset, elementOffset;
+        for (var i = 0; i < bucket.elementGroups.groups.length; i++) {
+            group = bucket.elementGroups.groups[i];
             offset = group.vertexStartIndex * vertex.itemSize;
-            gl.vertexAttribPointer(painter.outlineShader.a_pos, 2, gl.SHORT, false, 4, offset + 0);
+            gl.vertexAttribPointer(painter.fillShader.a_pos, 2, gl.SHORT, false, 4, offset + 0);
 
-            count = group.secondElementLength * 2;
-            elementOffset = group.secondElementStartIndex * elements.itemSize;
-            gl.drawElements(gl.LINES, count, gl.UNSIGNED_SHORT, elementOffset);
+            count = group.elementLength * 3;
+            elementOffset = group.elementStartIndex * elements.itemSize;
+            gl.drawElements(gl.TRIANGLES, count, gl.UNSIGNED_SHORT, elementOffset);
         }
-    }
 
-    var image = layerStyle['fill-image'];
-    var opacity = layerStyle['fill-opacity'] || 1;
-    var shader;
+        // Now that we have the stencil mask in the stencil buffer, we can start
+        // writing to the color buffer.
+        gl.colorMask(true, true, true, true);
 
-    if (image) {
-        // Draw texture fill
-        var imagePos = painter.sprite.getPosition(image, true);
-        if (!imagePos) return;
+        // From now on, we don't want to update the stencil buffer anymore.
+        gl.stencilOp(gl.KEEP, gl.KEEP, gl.KEEP);
+        gl.stencilMask(0x0);
 
-        shader = painter.patternShader;
-        gl.switchShader(shader, posMatrix);
-        gl.uniform1i(shader.u_image, 0);
-        gl.uniform2fv(shader.u_pattern_tl, imagePos.tl);
-        gl.uniform2fv(shader.u_pattern_br, imagePos.br);
-        gl.uniform1f(shader.u_mix, painter.transform.zoomFraction);
-        gl.uniform1f(shader.u_opacity, opacity);
+        var strokeColor = layerStyle['fill-outline-color'];
 
-        var factor = 8 / Math.pow(2, painter.transform.tileZoom - tile.zoom);
+        // Because we're drawing top-to-bottom, and we update the stencil mask
+        // below, we have to draw the outline first (!)
+        if (layerStyle['fill-antialias'] === true && !(layerStyle['fill-image'] && !strokeColor)) {
+            gl.switchShader(painter.outlineShader);
+            gl.uniformMatrix4fv(painter.outlineShader.u_matrix, false, translatedPosMatrix);
+            gl.lineWidth(2 * browser.devicePixelRatio);
 
-        var matrix = mat3.create();
-        mat3.scale(matrix, matrix, [
-            1 / (imagePos.size[0] * factor),
-            1 / (imagePos.size[1] * factor)
-        ]);
+            if (strokeColor) {
+                // If we defined a different color for the fill outline, we are
+                // going to ignore the bits in 0x3F and just care about the global
+                // clipping mask.
+                gl.stencilFunc(gl.EQUAL, 0x80, 0x80);
+            } else {
+                // Otherwise, we only want to draw the antialiased parts that are
+                // *outside* the current shape. This is important in case the fill
+                // or stroke color is translucent. If we wouldn't clip to outside
+                // the current shape, some pixels from the outline stroke overlapped
+                // the (non-antialiased) fill.
+                gl.stencilFunc(gl.EQUAL, 0x80, 0xBF);
+            }
 
-        gl.uniformMatrix3fv(shader.u_patternmatrix, false, matrix);
+            gl.uniform2f(painter.outlineShader.u_world, gl.drawingBufferWidth, gl.drawingBufferHeight);
+            gl.uniform4fv(painter.outlineShader.u_color, strokeColor ? strokeColor : color);
 
-        painter.sprite.bind(gl, true);
+            // Draw all buffers
+            vertex = bucket.buffers.fillVertex;
+            elements = bucket.buffers.outlineElement;
+            elements.bind(gl);
 
-    } else {
-        // Draw filling rectangle.
-        shader = painter.fillShader;
-        gl.switchShader(shader, posMatrix);
-        gl.uniform4fv(shader.u_color, color);
-    }
+            for (var k = 0; k < bucket.elementGroups.groups.length; k++) {
+                group = bucket.elementGroups.groups[k];
+                offset = group.vertexStartIndex * vertex.itemSize;
+                gl.vertexAttribPointer(painter.outlineShader.a_pos, 2, gl.SHORT, false, 4, offset + 0);
 
-    // Only draw regions that we marked
-    gl.stencilFunc(gl.NOTEQUAL, 0x0, 0x3F);
-    gl.bindBuffer(gl.ARRAY_BUFFER, painter.tileExtentBuffer);
-    gl.vertexAttribPointer(shader.a_pos, painter.tileExtentBuffer.itemSize, gl.SHORT, false, 0, 0);
-    gl.drawArrays(gl.TRIANGLE_STRIP, 0, painter.tileExtentBuffer.itemCount);
+                count = group.secondElementLength * 2;
+                elementOffset = group.secondElementStartIndex * elements.itemSize;
+                gl.drawElements(gl.LINES, count, gl.UNSIGNED_SHORT, elementOffset);
+            }
+        }
 
-    gl.stencilMask(0x00);
-    gl.stencilFunc(gl.EQUAL, 0x80, 0x80);
+        var image = layerStyle['fill-image'];
+        var opacity = layerStyle['fill-opacity'] || 1;
+        var shader;
+
+        if (image) {
+            // Draw texture fill
+            var imagePos = painter.sprite.getPosition(image, true);
+            if (!imagePos) return;
+
+            shader = painter.patternShader;
+            gl.switchShader(shader);
+
+            gl.uniform1i(shader.u_image, 0);
+            gl.uniform2fv(shader.u_pattern_tl, imagePos.tl);
+            gl.uniform2fv(shader.u_pattern_br, imagePos.br);
+            gl.uniform1f(shader.u_mix, painter.transform.zoomFraction);
+            gl.uniform1f(shader.u_opacity, opacity);
+
+            var factor = 8 / Math.pow(2, painter.transform.tileZoom - tile.zoom);
+
+            var matrix = mat3.create();
+            mat3.scale(matrix, matrix, [
+                1 / (imagePos.size[0] * factor),
+                1 / (imagePos.size[1] * factor)
+            ]);
+
+            gl.uniformMatrix3fv(shader.u_patternmatrix, false, matrix);
+
+            painter.sprite.bind(gl, true);
+
+        } else {
+            // Draw filling rectangle.
+            shader = painter.fillShader;
+            gl.switchShader(shader);
+            gl.uniform4fv(shader.u_color, color);
+        }
+
+        gl.uniformMatrix4fv(shader.u_matrix, false, tile.posMatrix);
+
+        // Only draw regions that we marked
+        gl.stencilFunc(gl.NOTEQUAL, 0x0, 0x3F);
+        gl.bindBuffer(gl.ARRAY_BUFFER, painter.tileExtentBuffer);
+        gl.vertexAttribPointer(shader.a_pos, painter.tileExtentBuffer.itemSize, gl.SHORT, false, 0, 0);
+        gl.drawArrays(gl.TRIANGLE_STRIP, 0, painter.tileExtentBuffer.itemCount);
+
+        gl.stencilMask(0x00);
+        gl.stencilFunc(gl.EQUAL, 0x80, 0x80);
+    });
 }

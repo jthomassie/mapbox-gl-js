@@ -6,96 +6,131 @@ var mat4 = require('gl-matrix').mat4;
 var util = require('../util/util');
 
 module.exports = drawRaster;
+module.exports.prerendered = drawPrerendered;
 
-function drawRaster(gl, painter, layer, bucket, layerStyle, tile, posMatrix) {
-    var texture;
+function drawPrerendered(painter, layer, layerStyle, tiles) {
+    var gl = painter.gl;
 
-    if (layer && layer.layers) {
-        if (!bucket.prerendered) {
-            bucket.prerendered = new PrerenderedTexture(gl, bucket.layoutProperties, painter);
-            bucket.prerendered.bindFramebuffer();
+    tiles.forEach(function (tile) {
+        var bucket = tile.buckets[layer.ref || layer.id];
+        if (!bucket)
+            return;
+
+        var layoutProperties = bucket.layoutProperties;
+        var texture = bucket.prerendered;
+
+        if (!texture) {
+            texture = bucket.prerendered = new PrerenderedTexture(gl, layoutProperties, painter);
+            texture.bindFramebuffer();
 
             gl.clearStencil(0x80);
             gl.stencilMask(0xFF);
             gl.clear(gl.STENCIL_BUFFER_BIT | gl.COLOR_BUFFER_BIT);
             gl.stencilMask(0x00);
 
-            gl.viewport(0, 0, bucket.prerendered.size, bucket.prerendered.size);
+            gl.viewport(0, 0, texture.size, texture.size);
 
-            var buffer = bucket.prerendered.buffer * 4096;
-
+            var buffer = texture.buffer * 4096;
             var matrix = mat4.create();
             mat4.ortho(matrix, -buffer, 4096 + buffer, -4096 - buffer, buffer, 0, 1);
             mat4.translate(matrix, matrix, [0, -4096, 0]);
 
-            painter.renderLayers(layer.layers, tile, matrix);
+            tile = Object.create(tile);
+            tile.posMatrix = matrix;
 
-            if (bucket.layoutProperties['raster-blur'] > 0) {
-                bucket.prerendered.blur(painter, bucket.layoutProperties['raster-blur']);
+            painter.renderLayers(layer.layers, tile);
+
+            if (layoutProperties['raster-blur'] > 0) {
+                texture.blur(painter, layoutProperties['raster-blur']);
             }
 
-            bucket.prerendered.unbindFramebuffer();
+            texture.unbindFramebuffer();
             gl.viewport(0, 0, painter.width, painter.height);
         }
 
-        texture = bucket.prerendered;
-    } else {
-        texture = tile;
-    }
+        gl.disable(gl.STENCIL_TEST);
+
+        var shader = painter.rasterShader;
+        gl.switchShader(shader);
+        gl.uniformMatrix4fv(shader.u_matrix, false, tile.posMatrix);
+
+        // color parameters
+        gl.uniform1f(shader.u_brightness_low, layerStyle['raster-brightness'][0]);
+        gl.uniform1f(shader.u_brightness_high, layerStyle['raster-brightness'][1]);
+        gl.uniform1f(shader.u_saturation_factor, saturationFactor(layerStyle['raster-saturation']));
+        gl.uniform1f(shader.u_contrast_factor, contrastFactor(layerStyle['raster-contrast']));
+        gl.uniform3fv(shader.u_spin_weights, spinWeights(layerStyle['raster-hue-rotate']));
+
+        gl.activeTexture(gl.TEXTURE0);
+        texture.bind(gl);
+
+        // cross-fade parameters
+        gl.uniform2fv(shader.u_tl_parent, [0, 0]);
+        gl.uniform1f(shader.u_scale_parent, 1);
+        gl.uniform1f(shader.u_buffer_scale, (4096 * (1 + 2 * texture.buffer)) / 4096);
+        gl.uniform1f(shader.u_opacity0, layerStyle['raster-opacity']);
+        gl.uniform1f(shader.u_opacity1, 0);
+        gl.uniform1i(shader.u_image0, 0);
+        gl.uniform1i(shader.u_image1, 1);
+
+        gl.bindBuffer(gl.ARRAY_BUFFER, painter.tileExtentBuffer);
+        gl.vertexAttribPointer(shader.a_pos, 2, gl.SHORT, false, 8, 0);
+        gl.vertexAttribPointer(shader.a_texture_pos, 2, gl.SHORT, false, 8, 4);
+        gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+
+        gl.enable(gl.STENCIL_TEST);
+    });
+}
+
+function drawRaster(painter, layer, layerStyle, tiles) {
+    var gl = painter.gl;
+    var shader = painter.rasterShader;
 
     gl.disable(gl.STENCIL_TEST);
+    gl.switchShader(shader);
 
-    var shader = painter.rasterShader;
-    gl.switchShader(shader, posMatrix);
-
-    // color parameters
     gl.uniform1f(shader.u_brightness_low, layerStyle['raster-brightness'][0]);
     gl.uniform1f(shader.u_brightness_high, layerStyle['raster-brightness'][1]);
     gl.uniform1f(shader.u_saturation_factor, saturationFactor(layerStyle['raster-saturation']));
     gl.uniform1f(shader.u_contrast_factor, contrastFactor(layerStyle['raster-contrast']));
     gl.uniform3fv(shader.u_spin_weights, spinWeights(layerStyle['raster-hue-rotate']));
 
-    var parentTile, opacities;
-    if (layer && layer.layers) {
-        parentTile = null;
-        opacities = [layerStyle['raster-opacity'], 0];
-    } else {
-        parentTile = texture.source && texture.source._findLoadedParent(texture.id, 0, {});
-        opacities = getOpacities(texture, parentTile, layerStyle);
-    }
-    var parentScaleBy, parentTL;
-
-    gl.activeTexture(gl.TEXTURE0);
-    texture.bind(gl);
-
-    if (parentTile) {
-        gl.activeTexture(gl.TEXTURE1);
-        parentTile.bind(gl);
-
-        var tilePos = TileCoord.fromID(texture.id);
-        var parentPos = parentTile && TileCoord.fromID(parentTile.id);
-        parentScaleBy = Math.pow(2, parentPos.z - tilePos.z);
-        parentTL = [tilePos.x * parentScaleBy % 1, tilePos.y * parentScaleBy % 1];
-    } else {
-        opacities[1] = 0;
-    }
-
-    var bufferScale = bucket.prerendered ? (4096 * (1 + 2 * bucket.prerendered.buffer)) / 4096 : 1;
-
-    // cross-fade parameters
-    gl.uniform2fv(shader.u_tl_parent, parentTL || [0, 0]);
-    gl.uniform1f(shader.u_scale_parent, parentScaleBy || 1);
-    gl.uniform1f(shader.u_buffer_scale, bufferScale);
-    gl.uniform1f(shader.u_opacity0, opacities[0]);
-    gl.uniform1f(shader.u_opacity1, opacities[1]);
     gl.uniform1i(shader.u_image0, 0);
     gl.uniform1i(shader.u_image1, 1);
+    gl.uniform1f(shader.u_buffer_scale, 1);
 
-    gl.bindBuffer(gl.ARRAY_BUFFER, texture.boundsBuffer || painter.tileExtentBuffer);
+    tiles.forEach(function (tile) {
+        var parentTile = tile.source && tile.source._findLoadedParent(tile.id, 0, {});
+        var opacities = getOpacities(tile, parentTile, layerStyle);
+        var parentScaleBy, parentTL;
 
-    gl.vertexAttribPointer(shader.a_pos,         2, gl.SHORT, false, 8, 0);
-    gl.vertexAttribPointer(shader.a_texture_pos, 2, gl.SHORT, false, 8, 4);
-    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+        gl.activeTexture(gl.TEXTURE0);
+        tile.bind(gl);
+
+        if (parentTile) {
+            gl.activeTexture(gl.TEXTURE1);
+            parentTile.bind(gl);
+
+            var tilePos = TileCoord.fromID(tile.id);
+            var parentPos = parentTile && TileCoord.fromID(parentTile.id);
+            parentScaleBy = Math.pow(2, parentPos.z - tilePos.z);
+            parentTL = [tilePos.x * parentScaleBy % 1, tilePos.y * parentScaleBy % 1];
+        } else {
+            opacities[1] = 0;
+        }
+
+        gl.uniformMatrix4fv(shader.u_matrix, false, tile.posMatrix);
+
+        gl.uniform2fv(shader.u_tl_parent, parentTL || [0, 0]);
+        gl.uniform1f(shader.u_scale_parent, parentScaleBy || 1);
+        gl.uniform1f(shader.u_opacity0, opacities[0]);
+        gl.uniform1f(shader.u_opacity1, opacities[1]);
+
+        gl.bindBuffer(gl.ARRAY_BUFFER, tile.boundsBuffer || painter.tileExtentBuffer);
+        gl.vertexAttribPointer(shader.a_pos,         2, gl.SHORT, false, 8, 0);
+        gl.vertexAttribPointer(shader.a_texture_pos, 2, gl.SHORT, false, 8, 4);
+        gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    });
 
     gl.enable(gl.STENCIL_TEST);
 }

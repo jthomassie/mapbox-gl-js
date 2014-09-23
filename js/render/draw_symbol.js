@@ -5,14 +5,14 @@ var mat4 = require('gl-matrix').mat4;
 
 module.exports = drawSymbols;
 
-function drawSymbols(gl, painter, layer, bucket, layerStyle, tile, posMatrix) {
+function drawSymbols(painter, layer, style, tiles) {
+    var gl = painter.gl;
+
     gl.disable(gl.STENCIL_TEST);
-    if (bucket.elementGroups.text.groups.length) {
-        drawSymbol(gl, painter, bucket, layerStyle, tile, posMatrix, 'text');
-    }
-    if (bucket.elementGroups.icon.groups.length) {
-        drawSymbol(gl, painter, bucket, layerStyle, tile, posMatrix, 'icon');
-    }
+
+    drawSymbol(painter, layer, style, tiles, 'text');
+    drawSymbol(painter, layer, style, tiles, 'icon');
+
     gl.enable(gl.STENCIL_TEST);
 }
 
@@ -21,9 +21,12 @@ var defaultSizes = {
     text: 24
 };
 
-function drawSymbol(gl, painter, bucket, layerStyle, tile, posMatrix, prefix) {
+function drawSymbol(painter, layer, layerStyle, tiles, prefix) {
+    var gl = painter.gl;
 
-    posMatrix = painter.translateMatrix(posMatrix, tile.zoom, layerStyle[prefix + '-translate'], layerStyle[prefix + '-translate-anchor']);
+    var bucket = tiles[0].buckets[layer.ref || layer.id];
+    if (!bucket)
+        return;
 
     var layoutProperties = bucket.layoutProperties;
 
@@ -42,9 +45,9 @@ function drawSymbol(gl, painter, bucket, layerStyle, tile, posMatrix, prefix) {
 
     var text = prefix === 'text';
     var sdf = text || bucket.elementGroups.sdfIcons;
-    var shader, buffer, texsize;
+    var shader, texsize;
 
-    if (!text && !painter.sprite.loaded())
+    if (!text && (!painter.sprite || !painter.sprite.loaded()))
         return;
 
     gl.activeTexture(gl.TEXTURE0);
@@ -57,19 +60,15 @@ function drawSymbol(gl, painter, bucket, layerStyle, tile, posMatrix, prefix) {
 
     if (text) {
         painter.glyphAtlas.updateTexture(gl);
-        buffer = bucket.buffers.glyphVertex;
         texsize = [painter.glyphAtlas.width / 4, painter.glyphAtlas.height / 4];
     } else {
         painter.sprite.bind(gl, alignedWithMap || painter.params.rotating || painter.params.zooming || fontScale != 1 || sdf);
-        buffer = bucket.buffers.iconVertex;
         texsize = [painter.sprite.img.width, painter.sprite.img.height];
     }
 
-    gl.switchShader(shader, posMatrix, exMatrix);
+    gl.switchShader(shader);
     gl.uniform1i(shader.u_texture, 0);
     gl.uniform2fv(shader.u_texsize, texsize);
-
-    buffer.bind(gl, shader);
 
     // Convert the -pi..pi to an int8 range.
     var angle = Math.round(painter.transform.angle / Math.PI * 128);
@@ -88,29 +87,50 @@ function drawSymbol(gl, painter, bucket, layerStyle, tile, posMatrix, prefix) {
     gl.uniform1f(shader.u_maxfadezoom, Math.floor(f.maxfadezoom * 10));
     gl.uniform1f(shader.u_fadezoom, (painter.transform.zoom + f.bump) * 10);
 
-    var begin = bucket.elementGroups[prefix].groups[0].vertexStartIndex,
-        len = bucket.elementGroups[prefix].groups[0].vertexLength;
+    tiles.forEach(function(tile) {
+        var bucket = tile.buckets[layer.ref || layer.id];
+        if (!bucket)
+            return;
 
-    if (sdf) {
-        var sdfPx = 8;
-        var blurOffset = 1.19;
-        var haloOffset = 6;
-        var gamma = 0.105 * defaultSizes[prefix] / fontSize / browser.devicePixelRatio;
+        if (!bucket.elementGroups[prefix].groups.length)
+            return;
 
-        gl.uniform1f(shader.u_gamma, gamma);
-        gl.uniform4fv(shader.u_color, layerStyle[prefix + '-color']);
-        gl.uniform1f(shader.u_buffer, (256 - 64) / 256);
-        gl.drawArrays(gl.TRIANGLES, begin, len);
+        var posMatrix = painter.translateMatrix(tile.posMatrix, tile.zoom,
+            layerStyle[prefix + '-translate'], layerStyle[prefix + '-translate-anchor']);
 
-        if (layerStyle[prefix + '-halo-color']) {
-            // Draw halo underneath the text.
-            gl.uniform1f(shader.u_gamma, layerStyle[prefix + '-halo-blur'] * blurOffset / fontScale / sdfPx + gamma);
-            gl.uniform4fv(shader.u_color, layerStyle[prefix + '-halo-color']);
-            gl.uniform1f(shader.u_buffer, (haloOffset - layerStyle[prefix + '-halo-width'] / fontScale) / sdfPx);
+        if (text) {
+            bucket.buffers.glyphVertex.bind(gl, shader);
+        } else {
+            bucket.buffers.iconVertex.bind(gl, shader);
+        }
+
+        gl.uniformMatrix4fv(shader.u_matrix, false, posMatrix);
+        gl.uniformMatrix4fv(shader.u_exmatrix, false, exMatrix);
+
+        var begin = bucket.elementGroups[prefix].groups[0].vertexStartIndex,
+            len = bucket.elementGroups[prefix].groups[0].vertexLength;
+
+        if (sdf) {
+            var sdfPx = 8;
+            var blurOffset = 1.19;
+            var haloOffset = 6;
+            var gamma = 0.105 * defaultSizes[prefix] / fontSize / browser.devicePixelRatio;
+
+            gl.uniform1f(shader.u_gamma, gamma);
+            gl.uniform4fv(shader.u_color, layerStyle[prefix + '-color']);
+            gl.uniform1f(shader.u_buffer, (256 - 64) / 256);
+            gl.drawArrays(gl.TRIANGLES, begin, len);
+
+            if (layerStyle[prefix + '-halo-color']) {
+                // Draw halo underneath the text.
+                gl.uniform1f(shader.u_gamma, layerStyle[prefix + '-halo-blur'] * blurOffset / fontScale / sdfPx + gamma);
+                gl.uniform4fv(shader.u_color, layerStyle[prefix + '-halo-color']);
+                gl.uniform1f(shader.u_buffer, (haloOffset - layerStyle[prefix + '-halo-width'] / fontScale) / sdfPx);
+                gl.drawArrays(gl.TRIANGLES, begin, len);
+            }
+        } else {
+            gl.uniform1f(shader.u_opacity, layerStyle['icon-opacity']);
             gl.drawArrays(gl.TRIANGLES, begin, len);
         }
-    } else {
-        gl.uniform1f(shader.u_opacity, layerStyle['icon-opacity']);
-        gl.drawArrays(gl.TRIANGLES, begin, len);
-    }
+    });
 }
