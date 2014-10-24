@@ -14,7 +14,6 @@ function VectorTile(id, source, url, callback) {
     this.url = url;
     this.zoom = TileCoord.fromID(id).z;
     this.map = source.map;
-    this.id = util.uniqueId();
     this.callback = callback;
     this.source = source;
 
