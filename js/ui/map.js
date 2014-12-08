@@ -36,8 +36,9 @@ var Map = module.exports = function(options) {
         this.transform.lngRange = [b.getWest(), b.getEast()];
     }
 
+    this._onSourceChange = this._onSourceChange.bind(this);
     this._onStyleChange = this._onStyleChange.bind(this);
-    this._updateBuckets = this._updateBuckets.bind(this);
+    this.update = this.update.bind(this);
     this.render = this.render.bind(this);
 
     this._setupContainer();
@@ -97,7 +98,10 @@ util.extend(Map.prototype, {
         if (source.onAdd) {
             source.onAdd(this);
         }
-        if (source.enabled) source.fire('source.add', {source: source});
+        source
+            .on('tile.load', this.update)
+            .on('change', this._onSourceChange);
+        this.fire('source.add', {source: source});
         return this;
     },
 
@@ -109,8 +113,12 @@ util.extend(Map.prototype, {
         if (source.onRemove) {
             source.onRemove(this);
         }
+        source
+            .off('tile.load', this.update)
+            .off('change', this._onSourceChange);
         delete this.sources[id];
-        return this.fire('source.remove', {source: source});
+        this.fire('source.remove', {source: source});
+        return this;
     },
 
     addControl(control) {
@@ -235,8 +243,16 @@ util.extend(Map.prototype, {
         this._styleDirty = true;
         this._tilesDirty = true;
 
-        this._updateBuckets();
+        // Transfer a stripped down version of the style to the workers. They only
+        // need the bucket information to know what features to extract from the tile.
+        this.dispatcher.broadcast('set buckets', this.style.orderedBuckets);
 
+        // clears all tiles to recalculate geometries (for changes to linecaps, linejoins, ...)
+        for (var s in this.sources) {
+            this.sources[s].load();
+        }
+
+        this.update();
         this.fire('style.change');
 
         return this;
@@ -328,7 +344,7 @@ util.extend(Map.prototype, {
     render() {
         if (this._styleDirty) {
             this._styleDirty = false;
-            this._updateStyle();
+            this.style.recalculate(this.transform.zoom);
         }
 
         if (this._tilesDirty) {
@@ -371,7 +387,7 @@ util.extend(Map.prototype, {
 
             if (source) {
                 this.painter.clearStencil();
-                source.render(group);
+                source.render(group, this.painter);
 
             } else if (group.source === undefined) {
                 this.painter.draw(undefined, this.style, group, { background: true });
@@ -385,26 +401,14 @@ util.extend(Map.prototype, {
         }
     },
 
-    _onStyleChange () {
-        this.update(true);
-    },
-
-    _updateStyle() {
-        if (!this.style) return;
-        this.style.recalculate(this.transform.zoom);
-    },
-
-    _updateBuckets() {
-        // Transfer a stripped down version of the style to the workers. They only
-        // need the bucket information to know what features to extract from the tile.
-        this.dispatcher.broadcast('set buckets', this.style.orderedBuckets);
-
-        // clears all tiles to recalculate geometries (for changes to linecaps, linejoins, ...)
-        for (var s in this.sources) {
-            this.sources[s].load();
-        }
-
+    _onSourceChange(e) {
+        this.fire('source.change', e);
         this.update();
+    },
+
+    _onStyleChange(e) {
+        this.fire('style.change', e);
+        this.update(true);
     }
 });
 

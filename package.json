@@ -87,6 +87,7 @@
     ],
     "newcap": false,
     "browser": true,
+    "node": true,
     "globalstrict": true,
     "trailing": true,
     "undef": true,

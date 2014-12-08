@@ -12,8 +12,6 @@ var util = require('../util/util'),
 module.exports = Source;
 
 function Source(options) {
-    this.enabled = false;
-
     util.extend(this, util.pick(options,
         'type', 'url', 'tileSize'));
 
@@ -35,10 +33,8 @@ function Source(options) {
         util.extend(this, util.pick(tileJSON,
             'tiles', 'minzoom', 'maxzoom', 'attribution'));
 
-        this.enabled = true;
-        this.update();
-
-        if (this.map) this.map.fire('source.add', {source: this});
+        this._loaded = true;
+        this.fire('change');
     };
 
     if (this.url) {
@@ -55,10 +51,10 @@ Source.prototype = util.inherit(Evented, {
     maxzoom: 22,
     tileSize: 512,
     cacheSize: 20,
+    _loaded: false,
 
     onAdd(map) {
         this.map = map;
-        this.painter = map.painter;
     },
 
     load() {
@@ -68,6 +64,9 @@ Source.prototype = util.inherit(Evented, {
     },
 
     loaded() {
+        if (!this._loaded) {
+            return false;
+        }
         for (var t in this._tiles) {
             if (!this._tiles[t].loaded)
                 return false;
@@ -75,29 +74,29 @@ Source.prototype = util.inherit(Evented, {
         return true;
     },
 
-    render(layers) {
+    render(layers, painter) {
         // Iteratively paint every tile.
-        if (!this.enabled) return;
+        if (!this._loaded) return;
         var order = Object.keys(this._tiles);
         order.sort(zOrder);
         for (var i = 0; i < order.length; i++) {
             var id = order[i];
             var tile = this._tiles[id];
             if (tile.loaded && !this.coveredTiles[id]) {
-                this._renderTile(tile, id, layers);
+                this._renderTile(tile, id, layers, painter);
             }
         }
     },
 
     // Given a tile of data, its id, and a style layers, render the tile to the canvas
-    _renderTile(tile, id, layers) {
+    _renderTile(tile, id, layers, painter) {
         var pos = TileCoord.fromID(id);
         var z = pos.z, x = pos.x, y = pos.y, w = pos.w;
         x += w * (1 << z);
 
-        tile.calculateMatrices(z, x, y, this.map.transform, this.painter);
+        tile.calculateMatrices(z, x, y, this.map.transform, painter);
 
-        this.painter.draw(tile, this.map.style, layers, {
+        painter.draw(tile, this.map.style, layers, {
             z: z, x: x, y: y,
             debug: this.map.debug,
             antialiasing: this.map.antialiasing,
@@ -200,8 +199,7 @@ Source.prototype = util.inherit(Evented, {
     },
 
     update() {
-        if (!this.enabled) return;
-        this._updateTiles();
+        if (this._loaded) this._updateTiles();
     },
 
     // Removes tiles that are outside the viewport and adds new tiles that are inside the viewport.
@@ -295,7 +293,6 @@ Source.prototype = util.inherit(Evented, {
                     console.warn('failed to load tile %d/%d/%d: %s', pos.z, pos.x, pos.y, err.stack || err);
                 } else {
                     this.fire('tile.load', {tile: tile});
-                    this.map.update();
                 }
             });
         } else {

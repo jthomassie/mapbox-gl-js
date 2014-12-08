@@ -9,7 +9,6 @@ module.exports = GeoJSONSource;
 function GeoJSONSource(options) {
     this._tiles = {};
     this._alltiles = {};
-    this.enabled = true;
     this.zooms = [1, 5, 9, 13];
     this.minTileZoom = this.zooms[0];
     this.maxTileZoom = this.zooms[this.zooms.length - 1];
@@ -19,22 +18,22 @@ function GeoJSONSource(options) {
 GeoJSONSource.prototype = util.inherit(Source, {
     minzoom: 1,
     maxzoom: 13,
+    _dirty: true,
 
     setData(data) {
         this.data = data;
-        if (this.map) this._updateData();
+        this._dirty = true;
+        this.fire('change');
         return this;
     },
 
-    onAdd(map) {
-        this.map = map;
-        this.painter = map.painter;
-
-        if (this.map.style) this._updateData();
-        map.on('style.change', this._updateData.bind(this));
+    update() {
+        if (this._dirty) this._updateData();
+        if (this._loaded) this._updateTiles();
     },
 
     _updateData() {
+        this._dirty = false;
         this.workerID = this.map.dispatcher.send('parse geojson', {
             data: this.data,
             zooms: this.zooms,
@@ -42,10 +41,11 @@ GeoJSONSource.prototype = util.inherit(Source, {
             source: this.id
         }, (err, tiles) => {
             if (err) return;
+            this._loaded = true;
             for (var i = 0; i < tiles.length; i++) {
                 this._alltiles[tiles[i].id] = new GeoJSONTile(tiles[i].id, this, tiles[i]);
             }
-            if (this.map) this.map.update();
+            this.fire('change');
         });
         return this;
     },

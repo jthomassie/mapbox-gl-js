@@ -33,12 +33,12 @@ function VideoSource(options) {
             this.map.style.animationLoop.cancel(loopID);
         });
 
-        this.enabled = true;
+        this._loaded = true;
 
         if (this.map) {
             this.video.play();
             this.createTile();
-            this.map.update();
+            this.fire('change');
         }
     }.bind(this));
 }
@@ -121,8 +121,8 @@ VideoSource.prototype = util.inherit(Source, {
         // noop
     },
 
-    render(layers) {
-        if (!this.enabled) return;
+    render(layers, painter) {
+        if (!this._loaded) return;
         if (this.video.readyState < 2) return; // not enough data for current position
 
         var layer = layers[0];
@@ -138,9 +138,9 @@ VideoSource.prototype = util.inherit(Source, {
         buckets[layer.bucket] = bucket;
 
         var c = this.center;
-        this.tile.calculateMatrices(c.zoom, c.column, c.row, this.map.transform, this.map.painter);
-        this.map.painter.tile = this.tile;
-        this.map.painter.drawLayer(undefined, this.map.style, layer, {}, undefined, buckets);
+        this.tile.calculateMatrices(c.zoom, c.column, c.row, this.map.transform, painter);
+        painter.tile = this.tile;
+        painter.drawLayer(undefined, this.map.style, layer, {}, undefined, buckets);
     },
 
     bind(gl) {
